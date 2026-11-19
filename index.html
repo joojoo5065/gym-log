@@ -31,6 +31,10 @@ h3{font-size:14px;margin:0;font-weight:600}
 .subtabs [role=tab][aria-selected=true]{background:var(--fg);color:#fff;border-color:var(--fg)}
 :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 
+.mtabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.mtabs [role=tab]{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:500;color:var(--fg);cursor:pointer}
+.mtabs [role=tab][aria-selected=true]{background:var(--fg);color:#fff;border-color:var(--fg)}
+
 /* cards & forms */
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -191,8 +195,10 @@ body.playing{overflow:hidden}
   <section id="panel-trend" role="tabpanel" aria-labelledby="tab-trend" hidden>
     <div class="subtabs" role="tablist" aria-label="추이 종류" id="trend-tabs">
       <button role="tab" id="tt-body" aria-controls="trend-body" aria-selected="true">체중 추이</button>
+      <button role="tab" id="tt-inbody" aria-controls="trend-body" aria-selected="false" tabindex="-1">인바디 추이</button>
       <button role="tab" id="tt-work" aria-controls="trend-body" aria-selected="false" tabindex="-1">운동 추이</button>
     </div>
+    <div class="mtabs" role="tablist" aria-label="인바디 지표" id="ib-tabs" hidden></div>
     <div id="trend-body" role="tabpanel" aria-labelledby="tt-body">
     <div class="card">
       <div class="grid">
@@ -708,6 +714,7 @@ const wk=ex=>db.workouts.filter(r=>!ex||r.type===ex);
 const ib=k=>()=>db.inbody.map(r=>[r.date,r[k]]);
 const METRICS={
   weight:{label:'체중',unit:'kg',agg:'avg',note:'체중 기록과 인바디의 체중을 함께 씁니다.',src:()=>db.weights.map(r=>[r.date,r.weight]).concat(db.inbody.map(r=>[r.date,r.weight]))},
+  ibw:{label:'체중',unit:'kg',agg:'avg',note:'인바디로 잰 체중만 씁니다.',src:ib('weight')},
   muscle:{label:'골격근량',unit:'kg',agg:'avg',src:ib('muscle')},
   fat:{label:'체지방량',unit:'kg',agg:'avg',src:ib('fat')},
   fatPct:{label:'체지방률',unit:'%',agg:'avg',src:ib('fatPct')},
@@ -717,6 +724,7 @@ const METRICS={
   inten:{label:'운동 강도',unit:'',agg:'avg',ex:true,note:'0~5 척도의 평균입니다.',src:ex=>wk(ex).map(r=>[r.date,r.intensity])},
   days:{label:'운동한 날',unit:'일',agg:'days',ex:true,src:ex=>wk(ex).map(r=>[r.date,1])}
 };
+Object.keys(METRICS).forEach(k=>{METRICS[k].g=METRICS[k].ex?'work':k==='weight'?'body':'inbody';});
 const AGG_WORD={avg:'평균',sum:'합계',max:'최고',days:'일수'};
 const UNIT_WORD={day:'일별',month:'월별',year:'연별'};
 let trendSel=-1;
@@ -804,11 +812,17 @@ function drawChart(){
 
 function initTrend(){
   const setGroup=g=>{
-    $('#t-metric').innerHTML=Object.keys(METRICS).filter(k=>(METRICS[k].ex?'work':'body')===g).map(k=>'<option value="'+k+'">'+METRICS[k].label+'</option>').join('');
+    $('#t-metric').innerHTML=Object.keys(METRICS).filter(k=>METRICS[k].g===g).map(k=>'<option value="'+k+'">'+METRICS[k].label+'</option>').join('');
+    $('#t-metric').closest('label').hidden=g!=='work';
+    $('#ib-tabs').hidden=g!=='inbody';
+    if(g==='inbody')$('#t-metric').value=$('#ib-tabs [aria-selected=true]').dataset.m;
   };
+  $('#ib-tabs').innerHTML=Object.keys(METRICS).filter(k=>METRICS[k].g==='inbody').map((k,i)=>
+    '<button role="tab" id="ibt-'+k+'" data-m="'+k+'" aria-controls="trend-body" aria-selected="'+(i===0)+'"'+(i?' tabindex="-1"':'')+'>'+METRICS[k].label+'</button>').join('');
+  initTabs($('#ib-tabs'),id=>{$('#t-metric').value=id.slice(4);drawChart();});
   setGroup('body');
   initTabs($('#trend-tabs'),id=>{
-    setGroup(id==='tt-work'?'work':'body');
+    setGroup(id.slice(3));
     $('#trend-body').setAttribute('aria-labelledby',id);
     drawChart();
   });
