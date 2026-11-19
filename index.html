@@ -309,7 +309,14 @@ body.playing{overflow:hidden}
 /* ---------- 저장소 ---------- */
 const KEY='gymlog.v1';
 /* 클라우드 저장(Firebase) 설정. 값이 없으면 이 기기에만 저장된다. */
-const FIREBASE_CONFIG=null;
+const FIREBASE_CONFIG={
+  apiKey:"AIzaSyAmtb5Yw9LEgZtK9GqmebXrl2Xt93g9sZ4",
+  authDomain:"gym-log-ver1.firebaseapp.com",
+  projectId:"gym-log-ver1",
+  storageBucket:"gym-log-ver1.firebasestorage.app",
+  messagingSenderId:"19509372190",
+  appId:"1:19509372190:web:18b718ef08a0c26bcf950f"
+};
 const FB_VER='10.12.2';
 const COLS=['workouts','inbody','weights','routines'];
 const emptyDb=()=>({workouts:[],inbody:[],weights:[],routines:[],deleted:{}});
