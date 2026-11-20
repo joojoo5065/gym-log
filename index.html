@@ -159,6 +159,10 @@ body.playing{overflow:hidden}
 .player.rest .btn{background:transparent;color:#fff;border-color:#fff}
 .player.rest .btn.primary{background:#fff;color:#111}
 .btn:disabled{opacity:.3;cursor:default}
+/* 진행 중 루틴 수정: 편집 폼을 진행 화면 위에 전체 화면으로 */
+#rt-editor.over{position:fixed;inset:0;z-index:11;overflow-y:auto;margin:0;border:0;border-radius:0;padding:20px 20px calc(24px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.ed-steps>li.now{border-color:var(--fg)}
+.nowtag{flex:none;font-size:11px;font-weight:700;border:1px solid var(--fg);border-radius:999px;padding:1px 7px}
 
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;z-index:20;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw}
 #toast.show{opacity:1}
@@ -243,7 +247,7 @@ body.playing{overflow:hidden}
       <p class="muted small" style="margin:12px 0 0">위에서부터 순서대로 진행됩니다. 휴식은 매 세트가 끝날 때마다 나오고, 0으로 두면 휴식 화면 없이 넘어갑니다.</p>
       <ol class="ed-steps" id="rt-steps"></ol>
       <button class="btn" type="button" id="rt-add">+ 운동 추가</button>
-      <div class="actions"><button class="btn primary" type="submit">루틴 저장</button><button class="btn" type="button" id="rt-cancel">취소</button></div>
+      <div class="actions"><button class="btn primary" type="submit" id="rt-submit">루틴 저장</button><button class="btn" type="button" id="rt-cancel">취소</button></div>
     </form>
   </section>
 
@@ -277,7 +281,7 @@ body.playing{overflow:hidden}
 
 <!-- 루틴 진행 화면 -->
 <div id="player" class="player" role="dialog" aria-modal="true" aria-labelledby="p-title" hidden>
-  <div class="p-top"><span id="p-name"></span><button class="link" id="p-quit">종료</button></div>
+  <div class="p-top"><span id="p-name"></span><span><button class="link" id="p-edit">루틴 수정</button><button class="link" id="p-quit">종료</button></span></div>
   <div class="bar"><i id="p-bar"></i></div>
   <p id="p-count"></p>
   <div class="p-body">
@@ -299,6 +303,10 @@ body.playing{overflow:hidden}
         <label><input type="radio" name="p-int" value="5"><span>5</span></label>
       </div>
       <div class="ends"><span>가볍게</span><span>힘들게</span></div>
+    </div>
+    <div id="p-apply" hidden>
+      <p class="small" style="margin:14px 0 0">운동 중에 수정한 내용을 이 루틴에 반영할까요?</p>
+      <div class="actions" style="justify-content:center;margin-top:8px"><button class="btn primary" id="p-apply-y">루틴에 반영</button><button class="btn" id="p-apply-n">이번만 적용</button></div>
     </div>
   </div>
   <div class="p-extra">
@@ -886,11 +894,55 @@ function openEditor(r,copy){
   renderSteps();
   if(!r)$('#rt-name').focus();
 }
-function closeEditor(){draft=null;$('#rt-editor').hidden=true;$('#rt-view').hidden=false;renderRoutines();}
+function closeEditor(){
+  draft=null;$('#rt-editor').hidden=true;$('#rt-view').hidden=false;
+  if(P&&P.edit){
+    const e=P.edit;P.edit=null;$('#rt-editor').classList.remove('over');
+    $('#rt-submit').textContent='루틴 저장';
+    if(e.done)$('#p-go').focus();else{unpause(e);showStep(true);}   // 취소: 멈춰 둔 타이머를 이어서
+  }
+  renderRoutines();
+}
+// 편집하는 동안 멈춰 둔 휴식 타이머를 남은 시간 그대로 다시 흐르게
+function unpause(e){P.paused=false;if(e.left!=null)P.end=Date.now()+e.left;}
+// 진행 중 수정: 편집 사본의 각 운동에 원래 순서(_o)를 달아 두고, 저장할 때 지금 위치를 다시 찾는다
+function openPlayEditor(){
+  if(!P||P.i>=P.seq.length)return;
+  const st=P.seq[P.i];
+  openEditor(P.r);
+  draft.steps.forEach((s,i)=>{s._o=i;});
+  P.edit={oi:P.r.steps.indexOf(st.s),set:st.set,rest:st.type==='rest',
+    left:st.type==='rest'&&!P.rang?Math.max(0,P.end-Date.now()):null};
+  P.paused=true;clearInterval(P.timer);
+  $('#rt-ed-title').textContent='진행 중 루틴 수정';
+  $('#rt-submit').textContent='저장하고 계속';
+  $('#rt-editor').classList.add('over');$('#rt-editor').scrollTop=0;
+  renderSteps();
+  const li=$('#rt-steps .now');if(li)li.scrollIntoView({block:'center'});
+}
+function resumeAfterEdit(r,map){
+  const e=P.edit,seq=buildSeq(r),n=seq.length;
+  const workAt=(s,k)=>seq.findIndex(x=>x.type==='work'&&x.s===s&&x.set===k);
+  const at=j=>j>=0&&j<r.steps.length?workAt(r.steps[j],1):n;
+  const j=map.indexOf(e.oi);
+  let i,keep=false;
+  if(j<0){                                   // 하던 운동을 지웠으면: 원래 그 뒤에 있던 첫 운동으로
+    i=at(map.findIndex(o=>o>e.oi));
+  }else if(e.set>r.steps[j].sets){           // 세트 수를 이미 한 것보다 줄였으면: 다음 운동으로
+    i=at(j+1);
+  }else{
+    i=workAt(r.steps[j],e.set);
+    if(e.rest){i++;keep=i<n&&seq[i].type==='rest';}   // 쉬던 중이면 타이머를 이어 감
+  }
+  P.r=r;P.seq=seq;P.i=i<0?n:i;
+  $('#p-name').textContent=r.name;
+  e.done=true;unpause(e);
+  showStep(keep);
+}
 function renderSteps(){
-  const n=draft.steps.length;
+  const n=draft.steps.length,cur=P&&P.edit?P.edit.oi:-1;
   $('#rt-steps').innerHTML=draft.steps.map((s,i)=>
-    '<li data-i="'+i+'"><div class="stephead"><span class="no">'+(i+1)+'</span>'+
+    '<li data-i="'+i+'"'+(s._o===cur?' class="now"':'')+'><div class="stephead"><span class="no">'+(i+1)+'</span>'+(s._o===cur?'<span class="nowtag">진행 중</span>':'')+
     '<input data-k="name" list="exNames" placeholder="기구 / 운동명" aria-label="'+(i+1)+'번 기구 또는 운동명" value="'+esc(s.name)+'" autocomplete="off">'+
     '<button type="button" class="icon" data-mv="-1" aria-label="위로"'+(i===0?' disabled':'')+'>↑</button>'+
     '<button type="button" class="icon" data-mv="1" aria-label="아래로"'+(i===n-1?' disabled':'')+'>↓</button>'+
@@ -957,6 +1009,14 @@ function initRoutines(){
         s.reps=s.rs[0];
       }else delete s.rs;
     }
+    const inPlay=!!(P&&P.edit),map=draft.steps.map(s=>s._o);
+    draft.steps.forEach(s=>{delete s._o;});
+    if(inPlay){   // 진행 중 수정은 이번 운동에만 적용해 두고, 루틴에 반영할지는 마친 뒤에 묻는다
+      const sig=r=>JSON.stringify([r.name,r.steps]);
+      if(sig(draft)!==sig(P.r)){P.dirty=true;P.asked=false;}
+      resumeAfterEdit(draft,map);closeEditor();toast('수정한 내용으로 이어서 진행해요');
+      return;
+    }
     draft.u=Date.now();
     const i=db.routines.findIndex(r=>r.id===draft.id);
     if(i>=0)db.routines[i]=draft;else db.routines.push(draft);
@@ -997,7 +1057,7 @@ function buildSeq(r){
   r.steps.forEach(s=>{
     for(let k=1;k<=s.sets;k++){
       seq.push({type:'work',s:s,set:k});
-      if(s.rest>0)seq.push({type:'rest',sec:s.rest});
+      if(s.rest>0)seq.push({type:'rest',sec:s.rest,s:s,set:k});
     }
   });
   if(seq.length&&seq[seq.length-1].type==='rest')seq.pop();
@@ -1015,14 +1075,16 @@ function startRoutine(id){
   showStep();
 }
 const describe=st=>st.type==='work'?st.s.name+' '+st.set+'/'+st.s.sets+'세트 · '+setText(st.s,st.set):'휴식 '+st.sec+'초';
-function showStep(){
-  clearInterval(P.timer);P.rang=false;
+function showStep(keep){   // keep: 휴식 타이머를 새로 시작하지 않고 이어 감
+  clearInterval(P.timer);if(!keep)P.rang=false;
   const n=P.seq.length,el=$('#player'),done=P.i>=n,st=P.seq[P.i];
   el.classList.toggle('rest',!done&&st.type==='rest');
   $('#p-bar').style.width=(Math.min(P.i,n)/n*100)+'%';
   $('#p-count').textContent=done?n+' / '+n:(P.i+1)+' / '+n;
   $('#p-prev').disabled=P.i===0;
   $('#p-add').hidden=done||st.type!=='rest';
+  $('#p-edit').hidden=done;
+  $('#p-apply').hidden=!done||!P.dirty||P.asked;
   $('#p-save').hidden=!done;
   $('#p-save').disabled=P.saved;
   $('#p-save').textContent=P.saved?'기록에 저장됨':'헬스 기록으로 저장';
@@ -1046,14 +1108,31 @@ function showStep(){
     $('#p-title').textContent='쉬는 시간';
     $('#p-sub').textContent='';
     $('#p-go').textContent='다음';
-    P.end=Date.now()+st.sec*1000;
-    tick();P.timer=setInterval(tick,250);
+    if(!keep)P.end=Date.now()+st.sec*1000;
+    tick();
+    if(P.rang)$('#p-sub').textContent='휴식 끝 · 다음을 눌러 주세요';
+    else P.timer=setInterval(tick,250);
   }
   if(!done)$('#p-upnext').textContent='다음: '+(P.i+1<n?describe(P.seq[P.i+1]):'완료');
   $('#p-go').focus();
 }
+// 진행 중에 고친 내용을 저장된 루틴에 반영
+function applyEdits(yes){
+  P.asked=true;
+  if(yes){
+    const r=JSON.parse(JSON.stringify(P.r));r.u=Date.now();
+    const i=db.routines.findIndex(x=>x.id===r.id);
+    if(i>=0)db.routines[i]=r;else db.routines.push(r);
+    save();refreshNames();renderRoutines();
+  }
+  toast(yes?'루틴에 반영했어요':'루틴은 원래대로 두었어요');
+}
+// 답하지 않은 채 닫을 때 한 번 묻는다
+function askApplyOnClose(){
+  if(P.dirty&&!P.asked)applyEdits(confirm('운동 중에 수정한 내용을 「'+P.r.name+'」 루틴에 반영할까요?\n취소를 누르면 루틴은 원래대로 둡니다.'));
+}
 function tick(){
-  if(!P)return;
+  if(!P||P.paused)return;
   const left=Math.max(0,Math.ceil((P.end-Date.now())/1000));
   $('#p-big').textContent=mmss(left);
   if(left===0&&!P.rang){
@@ -1070,16 +1149,19 @@ function closePlayer(){
 }
 function initPlayer(){
   $('#p-go').addEventListener('click',()=>{
-    if(P.i>=P.seq.length){closePlayer();return;}
+    if(P.i>=P.seq.length){askApplyOnClose();closePlayer();return;}
     P.i++;showStep();
   });
+  $('#p-apply-y').addEventListener('click',()=>{applyEdits(true);showStep();});
+  $('#p-apply-n').addEventListener('click',()=>{applyEdits(false);showStep();});
   $('#p-prev').addEventListener('click',()=>{if(P.i>0){P.i--;showStep();}});
   $('#p-add').addEventListener('click',()=>{
     P.end=Math.max(P.end,Date.now())+10000;P.rang=false;$('#p-sub').textContent='';
     clearInterval(P.timer);tick();P.timer=setInterval(tick,250);
   });
+  $('#p-edit').addEventListener('click',openPlayEditor);
   $('#p-quit').addEventListener('click',()=>{
-    if(P.i>=P.seq.length||confirm('루틴을 여기서 종료할까요?'))closePlayer();
+    if(P.i>=P.seq.length||confirm('루틴을 여기서 종료할까요?')){askApplyOnClose();closePlayer();}
   });
   $('#p-save').addEventListener('click',()=>{
     if(P.saved)return;
@@ -1088,7 +1170,10 @@ function initPlayer(){
     db.workouts.push({id:uid(),date:today(),type:'헬스',min:P.min,intensity:Number(c.value),u:Date.now()});
     P.saved=true;save();showStep();toast('오늘 운동 기록에 저장했어요');
   });
-  document.addEventListener('keydown',e=>{if(P&&e.key==='Escape')$('#p-quit').click();});
+  document.addEventListener('keydown',e=>{
+    if(!P||e.key!=='Escape')return;
+    if(P.edit)closeEditor();else $('#p-quit').click();
+  });
   document.addEventListener('visibilitychange',()=>{
     if(P&&document.visibilityState==='visible'){
       tick();
